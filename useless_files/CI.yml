@@ -1,0 +1,77 @@
+# ETAPE 1 : la CI la plus simple possible
+# A chaque push, GitHub loue une machine Ubuntu, recupere le code,
+# puis execute les memes commandes que vous tapez dans votre terminal.
+
+# ETAPE 2 : travailler avec des Pull Requests
+# Nouveau : la CI se lance aussi sur chaque Pull Request.
+# On ne lance plus la CI sur tous les push, seulement sur master
+# (les autres branches sont testees via leur Pull Request).
+
+# ETAPE 3 : tester sur plusieurs systemes (matrice)
+# Nouveau : le job est lance une fois sur Linux et une fois sur Windows.
+# Sous Windows, CMake utilise Visual Studio qui peut produire Debug ET
+# Release : il faut donc preciser --config / -C Release.
+
+# ETAPE 4 : ajouter Docker a la CI
+# Nouveau : le job "docker" (en bas). Grace a "needs", il ne demarre
+# que si build-and-test a reussi.
+#
+# CI = Integration Continue
+# A chaque push sur master et a chaque Pull Request, GitHub :
+#   1. compile et teste le projet sur Linux et Windows
+#   2. verifie que l'image Docker se construit et s'execute
+# Si une etape echoue, la croix rouge apparait sur le commit / la PR.
+
+name: CI
+
+on:
+  push:
+    branches: [master]   # E2
+  pull_request:          # E2
+
+jobs:
+  # ==========================================================================
+  # CI (Integration Continue) : verifier chaque changement
+  # ==========================================================================
+
+  build-and-test:
+    name: CI - Compiler et tester (${{ matrix.os }})   # E3 : un nom par systeme
+    strategy:                                   # E3
+      fail-fast: false                          # E3 : ne pas arreter Windows si Linux echoue
+      matrix:                                   # E3
+        os: [ubuntu-latest, windows-latest]     # E3
+    runs-on: ${{ matrix.os }}                   # E3
+
+    steps:
+      - name: Recuperer le code
+        uses: actions/checkout@v4
+
+      - name: Configurer (cmake)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compiler
+        run: cmake --build build --config Release                   # E3 -> release pour winndows
+
+      - name: Tester (ctest)
+        run: ctest --test-dir build -C Release --output-on-failure  # E3 -> release pour winndows
+
+      - name: Installer et lancer le programme
+        run: |
+          cmake --install build --prefix install
+          ./install/bin/greet Alice
+
+  docker:                                               # ETAPE 4
+    name: CI - Image Docker
+    # On ne construit l'image que si les tests passent
+    needs: build-and-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Recuperer le code
+        uses: actions/checkout@v4
+
+      - name: Construire l'image
+        run: docker build -t greeter .
+
+      - name: Lancer l'image
+        run: docker run --rm greeter
